@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Splat Viewer — 3D Gaussian Splatting in WebGL2</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; overflow: hidden;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        background: #0d0f14; color: #e7e9ee; }
+      #view { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block;
+        touch-action: none; cursor: grab; }
+      #view:active { cursor: grabbing; }
+      .panel { position: fixed; z-index: 2; background: rgba(18, 21, 28, 0.82);
+        border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px;
+        backdrop-filter: blur(8px); padding: 12px 14px; }
+      #hud { top: 14px; left: 14px; line-height: 1.7; }
+      #hud h1 { margin: 0 0 6px; font-size: 13px; font-weight: 600; letter-spacing: 0.02em; }
+      #hud .sub { font-size: 11px; opacity: 0.6; }
+      #hud .stats { margin-top: 8px; font-size: 12px; }
+      #hud .stats b { color: #6ad0ff; font-weight: 600; }
+      #help { bottom: 14px; left: 14px; font-size: 11px; opacity: 0.62; line-height: 1.7; }
+      #load { top: 14px; right: 14px; }
+      #load label { font-size: 12px; cursor: pointer; color: #6ad0ff; }
+      #load input { display: none; }
+      #drop { position: fixed; inset: 0; z-index: 3; display: none;
+        align-items: center; justify-content: center; pointer-events: none;
+        background: rgba(13, 15, 20, 0.7); border: 2px dashed #6ad0ff;
+        font-size: 16px; color: #6ad0ff; }
+      #drop.active { display: flex; }
+    </style>
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+
+    <div id="hud" class="panel">
+      <h1>Splat Viewer</h1>
+      <div class="sub">3D Gaussian Splatting · WebGL2 · zero deps</div>
+      <div class="stats"><b id="count">—</b> · <span id="fps">—</span></div>
+    </div>
+
+    <div id="load" class="panel">
+      <label for="file">load .ply ↓</label>
+      <input id="file" type="file" accept=".ply" />
+    </div>
+
+    <div id="help" class="panel">drag to orbit · scroll to zoom · drop a .ply to load your own</div>
+
+    <div id="drop">drop a .ply Gaussian Splatting file</div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
