@@ -6,10 +6,18 @@ export class OrbitCamera {
   theta = 0.6; // azimuth
   phi = 0.35; // elevation
   radius = 4.5;
+  maxRadius = 40;
   target: number[];
 
   constructor(target: number[] = [0.5, 0, 0]) {
     this.target = target;
+  }
+
+  // Frame a loaded scene: look at its center and back off to fit its extent.
+  fit(center: number[], radius: number): void {
+    this.target = center;
+    this.maxRadius = Math.max(40, radius * 4);
+    this.radius = Math.min(this.maxRadius, Math.max(0.6, radius));
   }
 
   eye(): number[] {
@@ -34,6 +42,6 @@ export class OrbitCamera {
 
   zoom(delta: number): void {
     this.radius *= Math.exp(delta * 0.0015);
-    this.radius = Math.max(0.6, Math.min(40, this.radius));
+    this.radius = Math.max(0.6, Math.min(this.maxRadius, this.radius));
   }
 }

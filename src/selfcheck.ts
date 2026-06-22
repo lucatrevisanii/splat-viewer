@@ -4,8 +4,10 @@
 // Run with `npm run check`. Exits non-zero on any failure.
 
 import { parsePly, writePly, type RawSplat } from "./ply";
+import { parseSplat, writeSplat, type RawSplatRecord } from "./splat";
+import { depthSortOrder } from "./renderer";
 import { buildDemoScene } from "./scene";
-import { covarianceFromQuatScale } from "./math";
+import { covarianceFromQuatScale, lookAt } from "./math";
 import { OrbitCamera } from "./camera";
 
 let failures = 0;
@@ -78,6 +80,54 @@ console.log("ply round-trip");
   check("count preserved", data.count === 2, `got ${data.count}`);
   check("position preserved exactly", data.positions[0] === 1.5 && data.positions[1] === -2.25 && data.positions[5] === 9.5);
   check("alpha = sigmoid(0.4)", approx(data.colors[3], 1 / (1 + Math.exp(-0.4))));
+}
+
+console.log(".splat round-trip");
+{
+  const recs: RawSplatRecord[] = [
+    { x: 1.5, y: 2.0, z: -0.5, scale: [0.1, 0.05, 0.05], rgba: [255, 128, 0, 200], rot: [1, 0, 0, 0] },
+    { x: -3, y: -1, z: 4, scale: [0.2, 0.2, 0.02], rgba: [10, 20, 30, 40], rot: [0.5, 0.5, 0.5, 0.5] },
+  ];
+  const data = parseSplat(writeSplat(recs));
+  check("count preserved", data.count === 2, `got ${data.count}`);
+  check("Y is flipped (+Y down -> +Y up)", approx(data.positions[1], -2.0) && approx(data.positions[4], 1.0));
+  check("X/Z preserved", approx(data.positions[0], 1.5) && approx(data.positions[2], -0.5));
+  check("color = rgba/255", approx(data.colors[0], 1, 1e-2) && approx(data.colors[1], 128 / 255, 1e-2) && approx(data.colors[3], 200 / 255, 1e-2));
+  check("scale is linear (no exp): isotropic-ish stays small", data.cov3d[0] < 0.1 && data.cov3d[0] > 0);
+
+  let pd = true;
+  for (let i = 0; i < data.count; i++) {
+    if (!isPositiveDefinite(Array.from(data.cov3d.subarray(i * 6, i * 6 + 6)))) pd = false;
+  }
+  check("covariances positive-definite after Y reflection", pd);
+}
+
+console.log("depth sort");
+{
+  // Identity view -> view-space z equals world z; far-to-near is ascending z.
+  const positions = new Float32Array([0, 0, 5, 0, 0, -3, 0, 0, 1, 0, 0, -10]);
+  const view = lookAt([0, 0, 0], [0, 0, -1], [0, 1, 0]); // looks down -Z
+  const order = depthSortOrder(positions, 4, view);
+  // Camera at origin looking down -Z: a splat at z=-10 is farthest, z=5 is behind.
+  const z = (i: number) => positions[i * 3 + 2];
+  let sorted = true;
+  for (let k = 1; k < order.length; k++) if (z(order[k]) < z(order[k - 1])) sorted = false;
+  check("order is far-to-near (ascending world z under this view)", sorted, `order=${Array.from(order)}`);
+  check("order is a permutation of 0..n-1", new Set(order).size === 4 && Math.max(...order) === 3);
+
+  // Bigger random set: result must stay a valid far-to-near permutation.
+  const N = 5000;
+  const big = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) {
+    big[i * 3] = Math.sin(i) * 3;
+    big[i * 3 + 1] = Math.cos(i * 1.7) * 3;
+    big[i * 3 + 2] = ((i * 2654435761) % 1000) / 100 - 5;
+  }
+  const ord = depthSortOrder(big, N, view);
+  let mono = true;
+  for (let k = 1; k < N; k++) if (big[ord[k] * 3 + 2] < big[ord[k - 1] * 3 + 2] - 1e-3) mono = false;
+  check("large set sorts monotonically by depth", mono);
+  check("large set order is a permutation", new Set(ord).size === N);
 }
 
 console.log("demo scene");

@@ -117,8 +117,7 @@ export class SplatRenderer {
 
   private count = 0;
   private positions: Float32Array = new Float32Array(0);
-  private order = new Uint32Array(0);
-  private depths = new Float32Array(0);
+  private scratch: SortScratch | null = null;
   private needsSort = true;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -186,9 +185,12 @@ export class SplatRenderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, TEX_WIDTH, height, 0, gl.RGBA, gl.FLOAT, buf);
 
-    this.order = new Uint32Array(data.count);
-    for (let i = 0; i < data.count; i++) this.order[i] = i;
-    this.depths = new Float32Array(data.count);
+    this.scratch = {
+      depths: new Float32Array(data.count),
+      bins: new Uint16Array(data.count),
+      counts: new Uint32Array(DEPTH_BINS),
+      order: new Uint32Array(data.count),
+    };
     this.needsSort = true;
   }
 
@@ -197,20 +199,11 @@ export class SplatRenderer {
   }
 
   private sort(view: Mat4): void {
-    const p = this.positions;
-    const d = this.depths;
-    // View-space z; more negative = farther from camera.
-    for (let i = 0; i < this.count; i++) {
-      d[i] = view[2] * p[i * 3] + view[6] * p[i * 3 + 1] + view[10] * p[i * 3 + 2] + view[14];
-    }
-    // Far-to-near: ascending z (most negative first).
-    const ord = Array.from(this.order);
-    ord.sort((a, b) => d[a] - d[b]);
-    this.order.set(ord);
-
+    if (!this.scratch) return;
+    const order = depthSortOrder(this.positions, this.count, view, this.scratch);
     const gl = this.gl;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.indexBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, this.order, gl.DYNAMIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, order, gl.DYNAMIC_DRAW);
   }
 
   render(view: Mat4, proj: Mat4, focal: [number, number], viewport: [number, number]): void {
@@ -267,4 +260,66 @@ function compile(gl: WebGL2RenderingContext, type: number, src: string): WebGLSh
     throw new Error("Shader compile failed: " + gl.getShaderInfoLog(sh));
   }
   return sh;
+}
+
+// --- depth sort --------------------------------------------------------------
+
+const DEPTH_BINS = 65536;
+
+export interface SortScratch {
+  depths: Float32Array; // count
+  bins: Uint16Array; // count
+  counts: Uint32Array; // DEPTH_BINS
+  order: Uint32Array; // count
+}
+
+// Painter's-algorithm ordering, far-to-near. A comparison sort is O(n log n)
+// and allocates a closure per element — at ~1M splats it stalls every camera
+// move. This is a 16-bit counting sort: two O(n) passes over the depths plus
+// one over the bins, no per-element allocation. `scratch` lets the caller reuse
+// buffers across frames; omit it (e.g. in tests) to allocate fresh.
+export function depthSortOrder(
+  positions: Float32Array,
+  count: number,
+  view: Mat4,
+  scratch?: SortScratch,
+): Uint32Array {
+  const depths = scratch?.depths ?? new Float32Array(count);
+  const bins = scratch?.bins ?? new Uint16Array(count);
+  const counts = scratch?.counts ?? new Uint32Array(DEPTH_BINS);
+  const order = scratch?.order ?? new Uint32Array(count);
+  counts.fill(0);
+
+  let min = Infinity;
+  let max = -Infinity;
+  for (let i = 0; i < count; i++) {
+    // View-space z; more negative = farther from the camera.
+    const z =
+      view[2] * positions[i * 3] +
+      view[6] * positions[i * 3 + 1] +
+      view[10] * positions[i * 3 + 2] +
+      view[14];
+    depths[i] = z;
+    if (z < min) min = z;
+    if (z > max) max = z;
+  }
+
+  const range = max - min;
+  const scale = range > 0 ? (DEPTH_BINS - 1) / range : 0;
+  for (let i = 0; i < count; i++) {
+    const b = ((depths[i] - min) * scale) | 0; // far -> small bin, drawn first
+    bins[i] = b;
+    counts[b]++;
+  }
+  // Prefix sum turns counts into stable per-bin start offsets (ascending depth).
+  let sum = 0;
+  for (let b = 0; b < DEPTH_BINS; b++) {
+    const c = counts[b];
+    counts[b] = sum;
+    sum += c;
+  }
+  for (let i = 0; i < count; i++) {
+    order[counts[bins[i]]++] = i;
+  }
+  return order;
 }
